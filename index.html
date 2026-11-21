@@ -1,0 +1,1049 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Escapa de la Pala 3D</title>
+    <!-- Tailwind CSS para la interfaz de usuario -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js para el motor gráfico 3D -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Tone.js para efectos de sonido sintetizados sin archivos externos -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <!-- Fuente estilo terror/arcade -->
+    <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,600;0,700;1,700&family=Creepster&display=swap" rel="stylesheet">
+
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #050505;
+            font-family: 'Chakra Petch', sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none;
+        }
+
+        #game-canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        .horror-title {
+            font-family: 'Creepster', cursive;
+            letter-spacing: 3px;
+            text-shadow: 0 0 15px rgba(239, 68, 68, 0.8), 0 4px 10px rgba(0, 0, 0, 0.9);
+        }
+
+        /* Efecto de viñeta roja cuando la pala está cerca */
+        #danger-vignette {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            background: radial-gradient(circle, transparent 50%, rgba(220, 38, 38, 0.75) 100%);
+            opacity: 0;
+            transition: opacity 0.2s ease-out;
+            z-index: 10;
+        }
+
+        /* Botones estilo arcade 3D */
+        .btn-arcade {
+            background: linear-gradient(180deg, #ef4444 0%, #991b1b 100%);
+            box-shadow: 0 6px 0 #450a0a, 0 10px 20px rgba(0, 0, 0, 0.6);
+            transition: transform 0.1s, box-shadow 0.1s;
+        }
+        .btn-arcade:active {
+            transform: translateY(4px);
+            box-shadow: 0 2px 0 #450a0a, 0 4px 10px rgba(0, 0, 0, 0.6);
+        }
+
+        .control-btn {
+            background: rgba(255, 255, 255, 0.12);
+            backdrop-filter: blur(6px);
+            border: 2px solid rgba(255, 255, 255, 0.25);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+        }
+        .control-btn:active {
+            background: rgba(239, 68, 68, 0.4);
+            border-color: #ef4444;
+            transform: scale(0.95);
+        }
+    </style>
+</head>
+<body class="text-white">
+
+    <!-- Viñeta de peligro -->
+    <div id="danger-vignette"></div>
+
+    <!-- Contenedor del Canvas 3D -->
+    <canvas id="game-canvas"></canvas>
+
+    <!-- HUD (Interfaz durante el juego) -->
+    <div id="hud" class="hidden fixed inset-0 pointer-events-none z-20 flex flex-col justify-between p-4 sm:p-6">
+        <!-- Barra superior: Distancia, Energía y Proximidad de la Pala -->
+        <div class="flex flex-wrap justify-between items-start gap-4 max-w-4xl mx-auto w-full">
+            <!-- Distancia recorrida -->
+            <div class="bg-black/70 border border-zinc-700/80 backdrop-blur-md px-4 py-2 rounded-xl shadow-lg">
+                <div class="text-xs text-zinc-400 uppercase tracking-wider">Distancia</div>
+                <div class="text-2xl sm:text-3xl font-bold text-amber-400"><span id="score-display">0</span> m</div>
+            </div>
+
+            <!-- Medidor de proximidad de la pala -->
+            <div class="bg-black/70 border border-red-900/80 backdrop-blur-md px-4 py-2 rounded-xl shadow-lg flex-1 max-w-xs mx-auto">
+                <div class="flex justify-between text-xs uppercase tracking-wider mb-1">
+                    <span class="text-red-400 font-bold flex items-center gap-1">
+                        <!-- Icono SVG de Pala -->
+                        <svg class="w-4 h-4 inline" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 4l6 6m-3-3L7 17l-4 4 4-4 10-10z"/>
+                            <path d="M2 22l5-5"/>
+                        </svg>
+                        Peligro Pala
+                    </span>
+                    <span id="distance-enemy-text" class="text-zinc-300">Lejos</span>
+                </div>
+                <div class="w-full h-3 bg-zinc-800 rounded-full overflow-hidden border border-zinc-700">
+                    <div id="danger-bar" class="h-full bg-gradient-to-r from-amber-500 to-red-600 transition-all duration-150" style="width: 30%;"></div>
+                </div>
+            </div>
+
+            <!-- Barra de Estamina / Sprint -->
+            <div class="bg-black/70 border border-zinc-700/80 backdrop-blur-md px-4 py-2 rounded-xl shadow-lg">
+                <div class="flex justify-between text-xs text-cyan-400 uppercase tracking-wider mb-1">
+                    <span>Energía (Sprint)</span>
+                </div>
+                <div class="w-28 sm:w-36 h-3 bg-zinc-800 rounded-full overflow-hidden border border-zinc-700">
+                    <div id="stamina-bar" class="h-full bg-cyan-400 transition-all duration-75" style="width: 100%;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Controles Táctiles / Botones inferiores para Móvil y Escritorio -->
+        <div class="pointer-events-auto max-w-xl mx-auto w-full flex justify-between items-end pb-2 sm:pb-4 gap-2">
+            <!-- Izquierda / Derecha -->
+            <div class="flex gap-3">
+                <button id="btn-left" class="control-btn w-16 h-16 sm:w-20 sm:h-20 rounded-2xl flex items-center justify-center text-white" aria-label="Izquierda">
+                    <svg class="w-8 h-8" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/>
+                    </svg>
+                </button>
+                <button id="btn-right" class="control-btn w-16 h-16 sm:w-20 sm:h-20 rounded-2xl flex items-center justify-center text-white" aria-label="Derecha">
+                    <svg class="w-8 h-8" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Saltar y Correr (Sprint) -->
+            <div class="flex gap-3">
+                <button id="btn-sprint" class="control-btn px-4 h-16 sm:h-20 rounded-2xl flex flex-col items-center justify-center text-cyan-300 font-bold text-xs sm:text-sm">
+                    <svg class="w-6 h-6 mb-1" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                    </svg>
+                    CORRER
+                </button>
+                <button id="btn-jump" class="control-btn w-16 h-16 sm:w-20 sm:h-20 rounded-2xl flex flex-col items-center justify-center text-amber-300 font-bold text-xs sm:text-sm" aria-label="Saltar">
+                    <svg class="w-7 h-7" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M5 15l7-7 7 7"/>
+                    </svg>
+                    SALTAR
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pantalla de Inicio -->
+    <div id="start-screen" class="fixed inset-0 z-30 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4">
+        <div class="max-w-md w-full bg-zinc-900/95 border-2 border-red-900/60 rounded-3xl p-6 sm:p-8 text-center shadow-2xl">
+            <div class="inline-flex items-center justify-center w-20 h-20 rounded-full bg-red-950/80 border border-red-600/50 mb-4 shadow-inner">
+                <!-- Ilustración SVG de Pala -->
+                <svg class="w-12 h-12 text-red-500 transform -rotate-45" viewBox="0 0 64 64" fill="currentColor">
+                    <rect x="29" y="4" width="6" height="34" rx="2" fill="#d97706"/>
+                    <path d="M24 2h16v6H24z" fill="#b45309"/>
+                    <path d="M20 36h24v14c0 8-12 12-12 12s-12-4-12-12V36z" fill="#9ca3af"/>
+                    <path d="M24 38h16v10c0 5-8 8-8 8s-8-3-8-8V38z" fill="#6b7280"/>
+                </svg>
+            </div>
+
+            <h1 class="horror-title text-4xl sm:text-5xl text-red-500 mb-2">ESCAPA DE LA PALA</h1>
+            <p class="text-zinc-300 text-sm sm:text-base mb-6">
+                ¡No dejes que te ponga a trabajar! Corre por el pasillo oscuro, esquiva las cajas, salta las barreras y recoge bebidas energéticas.
+            </p>
+
+            <!-- Instrucciones -->
+            <div class="bg-black/60 rounded-2xl p-4 mb-6 text-left text-xs sm:text-sm space-y-2 border border-zinc-800">
+                <div class="flex items-center gap-2 text-zinc-300">
+                    <span class="px-2 py-0.5 bg-zinc-800 rounded text-amber-400 font-bold">A / D</span> o <span class="px-2 py-0.5 bg-zinc-800 rounded text-amber-400 font-bold">◀ / ▶</span> : Cambiar de carril
+                </div>
+                <div class="flex items-center gap-2 text-zinc-300">
+                    <span class="px-2 py-0.5 bg-zinc-800 rounded text-amber-400 font-bold">W / ESPACIO</span> : Saltar obstáculos
+                </div>
+                <div class="flex items-center gap-2 text-zinc-300">
+                    <span class="px-2 py-0.5 bg-zinc-800 rounded text-cyan-400 font-bold">SHIFT</span> : Acelerar (gasta energía)
+                </div>
+                <div class="text-zinc-400 italic pt-1">
+                    * En móvil también puedes deslizar el dedo (swipe) o usar los botones en pantalla.
+                </div>
+            </div>
+
+            <button id="start-btn" class="btn-arcade w-full py-4 rounded-2xl font-bold text-lg sm:text-xl tracking-wider uppercase text-white cursor-pointer">
+                ¡CORRER POR MI VIDA!
+            </button>
+        </div>
+    </div>
+
+    <!-- Pantalla de Game Over -->
+    <div id="gameover-screen" class="hidden fixed inset-0 z-30 flex items-center justify-center bg-black/90 backdrop-blur-md p-4">
+        <div class="max-w-md w-full bg-zinc-900 border-2 border-red-600 rounded-3xl p-6 sm:p-8 text-center shadow-2xl">
+            <h2 class="horror-title text-5xl text-red-500 mb-2">¡TE ATRAPÓ!</h2>
+            <p class="text-zinc-300 text-base mb-6">La pala te alcanzó. Ahora toca cavar zanjas toda la eternidad...</p>
+
+            <div class="grid grid-cols-2 gap-4 mb-6">
+                <div class="bg-black/60 p-4 rounded-2xl border border-zinc-800">
+                    <div class="text-xs text-zinc-400 uppercase">Distancia Final</div>
+                    <div class="text-2xl font-bold text-amber-400"><span id="final-score">0</span> m</div>
+                </div>
+                <div class="bg-black/60 p-4 rounded-2xl border border-zinc-800">
+                    <div class="text-xs text-zinc-400 uppercase">Récord</div>
+                    <div class="text-2xl font-bold text-emerald-400"><span id="best-score">0</span> m</div>
+                </div>
+            </div>
+
+            <button id="restart-btn" class="btn-arcade w-full py-4 rounded-2xl font-bold text-lg tracking-wider uppercase text-white cursor-pointer">
+                INTENTAR DE NUEVO
+            </button>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * ESCAPA DE LA PALA 3D
+         * Motor 3D con Three.js, efectos de sonido con Tone.js,
+         * física de carriles, salto, sprint, cámara dinámica y persecución.
+         */
+
+        // --- VARIABLES GLOBALES Y ESTADO DEL JUEGO ---
+        let scene, camera, renderer;
+        let playerGroup, shovelGroup, shovelPivot;
+        let corridorSegments = [];
+        let obstacles = [];
+        let pickups = [];
+        let corridorLights = [];
+
+        // Estado del juego
+        const GAME_STATE = {
+            MENU: 0,
+            PLAYING: 1,
+            GAMEOVER: 2
+        };
+        let currentState = GAME_STATE.MENU;
+
+        // Parámetros de jugabilidad
+        const LANES = [-2.4, 0, 2.4]; // Tres carriles en el eje X
+        let currentLane = 1; // 0: Izquierda, 1: Centro, 2: Derecha
+        let targetX = 0;
+
+        // Física vertical (Salto)
+        let playerY = 0;
+        let velocityY = 0;
+        const GRAVITY = -38;
+        const JUMP_FORCE = 14.5;
+        let isGrounded = true;
+
+        // Velocidad y persecución
+        let baseSpeed = 18;
+        let currentSpeed = 18;
+        let distanceTraveled = 0;
+        let bestDistance = localStorage.getItem('pala_best_score') || 0;
+
+        // Estamina / Sprint
+        let stamina = 100;
+        let isSprinting = false;
+
+        // Posición de la Pala (Z positivo está detrás de la cámara/jugador)
+        // El jugador está en Z = 0. La pala empieza en Z = 7.5 y se acerca si chocas o vas lento.
+        let shovelZ = 7.5;
+        const SHOVEL_MAX_DIST = 11.0; // Máxima distancia atrás
+        const SHOVEL_CATCH_DIST = 1.1; // Distancia a la que te atrapa
+
+        // Efectos de cámara (Screen shake)
+        let cameraShake = 0;
+
+        // Control de tiempo
+        let lastTime = 0;
+        let spawnTimer = 0;
+        let pickupTimer = 0;
+
+        // Sintetizadores de Audio (Tone.js)
+        let audioInitialized = false;
+        let metalHitSynth, jumpSynth, pickupSynth, stepSynth, heartbeatSynth;
+        let lastStepTime = 0;
+
+        // --- INICIALIZACIÓN DE AUDIO ---
+        async function initAudio() {
+            if (audioInitialized) return;
+            try {
+                await Tone.start();
+
+                // Sonido metálico de pala golpeando
+                metalHitSynth = new Tone.MetalSynth({
+                    frequency: 180,
+                    envelope: { attack: 0.001, decay: 0.4, release: 0.2 },
+                    harmonicity: 5.1,
+                    modulationIndex: 32,
+                    resonance: 4000,
+                    octaves: 1.5
+                }).toDestination();
+                metalHitSynth.volume.value = -8;
+
+                // Sonido de salto
+                jumpSynth = new Tone.Synth({
+                    oscillator: { type: 'sine' },
+                    envelope: { attack: 0.01, decay: 0.15, sustain: 0, release: 0.1 }
+                }).toDestination();
+                jumpSynth.volume.value = -10;
+
+                // Sonido de recoger bebida energética
+                pickupSynth = new Tone.PolySynth(Tone.Synth).toDestination();
+                pickupSynth.volume.value = -8;
+
+                // Sonido de pasos
+                stepSynth = new Tone.MembraneSynth({
+                    pitchDecay: 0.02,
+                    octaves: 2,
+                    envelope: { attack: 0.001, decay: 0.08, sustain: 0 }
+                }).toDestination();
+                stepSynth.volume.value = -16;
+
+                audioInitialized = true;
+            } catch (e) {
+                console.warn("Audio no disponible:", e);
+            }
+        }
+
+        function playSound(type) {
+            if (!audioInitialized) return;
+            try {
+                if (type === 'jump') {
+                    jumpSynth.triggerAttackRelease('C4', '8n');
+                    jumpSynth.frequency.rampTo('G4', 0.12);
+                } else if (type === 'hit') {
+                    metalHitSynth.triggerAttackRelease('C2', '8n');
+                } else if (type === 'pickup') {
+                    pickupSynth.triggerAttackRelease(['E5', 'G5', 'B5'], '16n');
+                } else if (type === 'step') {
+                    stepSynth.triggerAttackRelease('G1', '32n');
+                }
+            } catch (e) {}
+        }
+
+        // --- CONSTRUCCIÓN DE LA ESCENA 3D ---
+        function initThreeJS() {
+            const canvas = document.getElementById('game-canvas');
+
+            // 1. Escena y Niebla oscura para atmósfera de pasillo terrorífico
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x070709);
+            scene.fog = new THREE.FogExp2(0x070709, 0.032);
+
+            // 2. Cámara en tercera persona detrás del jugador
+            camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 100);
+            camera.position.set(0, 3.2, 5.5);
+            camera.lookAt(0, 1.4, -8);
+
+            // 3. Renderizador
+            renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+            // 4. Iluminación ambiental tenue
+            const ambientLight = new THREE.AmbientLight(0x2a2d3d, 0.9);
+            scene.add(ambientLight);
+
+            // Luz direccional fría
+            const dirLight = new THREE.DirectionalLight(0x8899bb, 0.6);
+            dirLight.position.set(0, 10, 5);
+            scene.add(dirLight);
+
+            // 5. Construir el pasillo infinito (segmentos reciclables)
+            buildCorridor();
+
+            // 6. Construir al Jugador
+            buildPlayer();
+
+            // 7. Construir la PALA asesina
+            buildShovel();
+
+            // Manejar redimensionado de pantalla
+            window.addEventListener('resize', onWindowResize, false);
+        }
+
+        // Crear textura procedural de baldosas/ladrillos para el pasillo
+        function createGridTexture(color1, color2, lines) {
+            const c = document.createElement('canvas');
+            c.width = 256;
+            c.height = 256;
+            const ctx = c.getContext('2d');
+            ctx.fillStyle = color1;
+            ctx.fillRect(0, 0, 256, 256);
+
+            ctx.strokeStyle = color2;
+            ctx.lineWidth = 4;
+            const step = 256 / lines;
+            for (let i = 0; i <= lines; i++) {
+                ctx.beginPath();
+                ctx.moveTo(i * step, 0);
+                ctx.lineTo(i * step, 256);
+                ctx.stroke();
+
+                ctx.beginPath();
+                ctx.moveTo(0, i * step);
+                ctx.lineTo(256, i * step);
+                ctx.stroke();
+            }
+            const tex = new THREE.CanvasTexture(c);
+            tex.wrapS = THREE.RepeatWrapping;
+            tex.wrapT = THREE.RepeatWrapping;
+            return tex;
+        }
+
+        function buildCorridor() {
+            const floorTex = createGridTexture('#1e2028', '#111217', 4);
+            floorTex.repeat.set(3, 4);
+            const wallTex = createGridTexture('#27272a', '#18181b', 2);
+            wallTex.repeat.set(4, 2);
+
+            const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.7, metalness: 0.1 });
+            const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.85 });
+            const ceilingMat = new THREE.MeshStandardMaterial({ color: 0x121215, roughness: 0.9 });
+            const pillarMat = new THREE.MeshStandardMaterial({ color: 0x3f3f46, roughness: 0.6 });
+
+            const segmentLength = 12;
+            const numSegments = 9; // Cubre desde Z = +12 hasta Z = -96
+
+            for (let i = 0; i < numSegments; i++) {
+                const seg = new THREE.Group();
+                seg.position.z = 12 - i * segmentLength;
+
+                // Suelo (ancho 8.4 para 3 carriles cómodos)
+                const floor = new THREE.Mesh(new THREE.BoxGeometry(8.4, 0.5, segmentLength), floorMat);
+                floor.position.y = -0.25;
+                floor.receiveShadow = true;
+                seg.add(floor);
+
+                // Líneas sutiles de carriles en el suelo
+                const lineMat = new THREE.MeshBasicMaterial({ color: 0x3b3f4e });
+                [-1.2, 1.2].forEach(lx => {
+                    const line = new THREE.Mesh(new THREE.PlaneGeometry(0.08, segmentLength), lineMat);
+                    line.rotation.x = -Math.PI / 2;
+                    line.position.set(lx, 0.01, 0);
+                    seg.add(line);
+                });
+
+                // Pared Izquierda y Derecha
+                const leftWall = new THREE.Mesh(new THREE.BoxGeometry(0.6, 6, segmentLength), wallMat);
+                leftWall.position.set(-4.5, 3, 0);
+                leftWall.receiveShadow = true;
+                seg.add(leftWall);
+
+                const rightWall = new THREE.Mesh(new THREE.BoxGeometry(0.6, 6, segmentLength), wallMat);
+                rightWall.position.set(4.5, 3, 0);
+                rightWall.receiveShadow = true;
+                seg.add(rightWall);
+
+                // Techo
+                const ceiling = new THREE.Mesh(new THREE.BoxGeometry(9.6, 0.5, segmentLength), ceilingMat);
+                ceiling.position.y = 6.2;
+                seg.add(ceiling);
+
+                // Columnas estructurales en las paredes para sensación de velocidad
+                const leftPillar = new THREE.Mesh(new THREE.BoxGeometry(0.5, 6, 0.6), pillarMat);
+                leftPillar.position.set(-4.1, 3, 0);
+                seg.add(leftPillar);
+
+                const rightPillar = new THREE.Mesh(new THREE.BoxGeometry(0.5, 6, 0.6), pillarMat);
+                rightPillar.position.set(4.1, 3, 0);
+                seg.add(rightPillar);
+
+                // Lámpara fluorescente en el techo cada 2 segmentos
+                if (i % 2 === 0) {
+                    const lampBox = new THREE.Mesh(
+                        new THREE.BoxGeometry(1.6, 0.15, 0.4),
+                        new THREE.MeshBasicMaterial({ color: 0xffedd5 })
+                    );
+                    lampBox.position.set(0, 5.9, 0);
+                    seg.add(lampBox);
+
+                    const pointLight = new THREE.PointLight(0xffedd5, 1.1, 18);
+                    pointLight.position.set(0, 5.3, 0);
+                    seg.add(pointLight);
+                    corridorLights.push(pointLight);
+                }
+
+                scene.add(seg);
+                corridorSegments.push(seg);
+            }
+        }
+
+        function buildPlayer() {
+            playerGroup = new THREE.Group();
+
+            // Torso (sudadera azul/gris)
+            const torsoMat = new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.6 });
+            const torso = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.9, 0.4), torsoMat);
+            torso.position.y = 1.15;
+            torso.castShadow = true;
+            playerGroup.add(torso);
+
+            // Cabeza
+            const headMat = new THREE.MeshStandardMaterial({ color: 0xfcd34d, roughness: 0.5 });
+            const head = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.45, 0.45), headMat);
+            head.position.y = 1.88;
+            head.castShadow = true;
+            playerGroup.add(head);
+
+            // Piernas (para animar al correr)
+            const legMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.8 });
+            const leftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.7, 0.28), legMat);
+            leftLeg.position.set(-0.18, 0.35, 0);
+            leftLeg.name = 'leftLeg';
+            playerGroup.add(leftLeg);
+
+            const rightLeg = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.7, 0.28), legMat);
+            rightLeg.position.set(0.18, 0.35, 0);
+            rightLeg.name = 'rightLeg';
+            playerGroup.add(rightLeg);
+
+            // Brazos
+            const leftArm = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.7, 0.22), torsoMat);
+            leftArm.position.set(-0.5, 1.15, 0);
+            leftArm.name = 'leftArm';
+            playerGroup.add(leftArm);
+
+            const rightArm = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.7, 0.22), torsoMat);
+            rightArm.position.set(0.5, 1.15, 0);
+            rightArm.name = 'rightArm';
+            playerGroup.add(rightArm);
+
+            playerGroup.position.set(0, 0, 0);
+            scene.add(playerGroup);
+        }
+
+        function buildShovel() {
+            // Grupo principal que sigue al jugador
+            shovelGroup = new THREE.Group();
+            shovelGroup.position.set(0, 0, shovelZ);
+
+            // Pivote para animar el balanceo amenazante de la pala
+            shovelPivot = new THREE.Group();
+            shovelPivot.position.y = 1.6;
+            shovelGroup.add(shovelPivot);
+
+            // Mango de madera
+            const handleMat = new THREE.MeshStandardMaterial({ color: 0x92400e, roughness: 0.7 });
+            const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 2.2, 12), handleMat);
+            handle.position.y = 0.5;
+            shovelPivot.add(handle);
+
+            // Empuñadura superior en D
+            const gripTop = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.1, 0.12), handleMat);
+            gripTop.position.y = 1.6;
+            shovelPivot.add(gripTop);
+
+            // Hoja metálica de la pala (grande y brillante)
+            const bladeMat = new THREE.MeshStandardMaterial({
+                color: 0xd1d5db,
+                metalness: 0.85,
+                roughness: 0.25
+            });
+            const blade = new THREE.Mesh(new THREE.BoxGeometry(0.95, 1.15, 0.08), bladeMat);
+            blade.position.set(0, -0.9, -0.05);
+            blade.rotation.x = 0.18; // Ligera curvatura hacia adelante
+            shovelPivot.add(blade);
+
+            // Punta afilada de la pala
+            const tipGeo = new THREE.ConeGeometry(0.48, 0.45, 4);
+            const tip = new THREE.Mesh(tipGeo, bladeMat);
+            tip.rotation.x = Math.PI;
+            tip.rotation.y = Math.PI / 4;
+            tip.position.set(0, -1.65, -0.18);
+            shovelPivot.add(tip);
+
+            // Luz roja siniestra que emana de la pala para iluminar la espalda del jugador
+            const dangerLight = new THREE.PointLight(0xff1111, 2.5, 9);
+            dangerLight.position.set(0, 0.5, -0.5);
+            shovelGroup.add(dangerLight);
+
+            scene.add(shovelGroup);
+        }
+
+        // --- GENERACIÓN DE OBSTÁCULOS Y RECOMPENSAS ---
+        function spawnObstacle() {
+            // Elegir 1 o 2 carriles ocupados para dejar siempre al menos un camino libre
+            const availableLanes = [0, 1, 2];
+            // Mezclar carriles
+            availableLanes.sort(() => Math.random() - 0.5);
+
+            const count = (distanceTraveled > 150 && Math.random() > 0.45) ? 2 : 1;
+
+            for (let i = 0; i < count; i++) {
+                const laneIdx = availableLanes[i];
+                const isJumpable = Math.random() > 0.45; // 55% valla saltable, 45% caja alta
+
+                const obsGroup = new THREE.Group();
+                obsGroup.position.set(LANES[laneIdx], 0, -85);
+
+                if (isJumpable) {
+                    // Valla de obra / Barrera baja (Se puede saltar)
+                    const barMat = new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.4 });
+                    const postMat = new THREE.MeshStandardMaterial({ color: 0x3f3f46 });
+
+                    const bar = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.45, 0.3), barMat);
+                    bar.position.y = 0.75;
+                    obsGroup.add(bar);
+
+                    const p1 = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.9, 0.25), postMat);
+                    p1.position.set(-0.8, 0.45, 0);
+                    obsGroup.add(p1);
+
+                    const p2 = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.9, 0.25), postMat);
+                    p2.position.set(0.8, 0.45, 0);
+                    obsGroup.add(p2);
+
+                    obsGroup.userData = { type: 'low', height: 1.0, lane: laneIdx, hit: false };
+                } else {
+                    // Caja industrial alta / Archivador (Hay que esquivar cambiando de carril)
+                    const crateMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.8 });
+                    const crate = new THREE.Mesh(new THREE.BoxGeometry(1.8, 2.4, 1.5), crateMat);
+                    crate.position.y = 1.2;
+                    obsGroup.add(crate);
+
+                    // Borde metálico
+                    const trimMat = new THREE.MeshStandardMaterial({ color: 0x52525b, metalness: 0.6 });
+                    const trim = new THREE.Mesh(new THREE.BoxGeometry(1.86, 0.2, 1.56), trimMat);
+                    trim.position.y = 2.2;
+                    obsGroup.add(trim);
+
+                    obsGroup.userData = { type: 'high', height: 2.4, lane: laneIdx, hit: false };
+                }
+
+                scene.add(obsGroup);
+                obstacles.push(obsGroup);
+            }
+        }
+
+        function spawnPickup() {
+            const laneIdx = Math.floor(Math.random() * 3);
+            const pickupGroup = new THREE.Group();
+            pickupGroup.position.set(LANES[laneIdx], 0.9, -85);
+
+            // Lata de bebida energética brillante (Cian neón)
+            const canMat = new THREE.MeshStandardMaterial({
+                color: 0x06b6d4,
+                emissive: 0x0891b2,
+                emissiveIntensity: 0.8,
+                metalness: 0.7,
+                roughness: 0.2
+            });
+            const can = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.65, 16), canMat);
+            can.rotation.z = 0.3;
+            pickupGroup.add(can);
+
+            // Anillo de luz alrededor
+            const ringMat = new THREE.MeshBasicMaterial({ color: 0x67e8f9, side: THREE.DoubleSide });
+            const ring = new THREE.Mesh(new THREE.RingGeometry(0.4, 0.5, 24), ringMat);
+            pickupGroup.add(ring);
+
+            pickupGroup.userData = { lane: laneIdx };
+            scene.add(pickupGroup);
+            pickups.push(pickupGroup);
+        }
+
+        // --- CONTROLES E INPUTS ---
+        function moveLeft() {
+            if (currentState !== GAME_STATE.PLAYING) return;
+            if (currentLane > 0) {
+                currentLane--;
+                targetX = LANES[currentLane];
+            }
+        }
+
+        function moveRight() {
+            if (currentState !== GAME_STATE.PLAYING) return;
+            if (currentLane < 2) {
+                currentLane++;
+                targetX = LANES[currentLane];
+            }
+        }
+
+        function jump() {
+            if (currentState !== GAME_STATE.PLAYING) return;
+            if (isGrounded) {
+                velocityY = JUMP_FORCE;
+                isGrounded = false;
+                playSound('jump');
+            }
+        }
+
+        function setSprint(active) {
+            isSprinting = active && stamina > 5;
+        }
+
+        // Teclado
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'ArrowLeft' || e.code === 'KeyA') moveLeft();
+            if (e.code === 'ArrowRight' || e.code === 'KeyD') moveRight();
+            if (e.code === 'ArrowUp' || e.code === 'KeyW' || e.code === 'Space') {
+                e.preventDefault();
+                jump();
+            }
+            if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
+                setSprint(true);
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
+                setSprint(false);
+            }
+        });
+
+        // Gestos táctiles (Swipe en el canvas)
+        let touchStartX = 0;
+        let touchStartY = 0;
+        const canvasEl = document.getElementById('game-canvas');
+
+        canvasEl.addEventListener('touchstart', (e) => {
+            touchStartX = e.changedTouches[0].screenX;
+            touchStartY = e.changedTouches[0].screenY;
+        }, { passive: true });
+
+        canvasEl.addEventListener('touchend', (e) => {
+            if (currentState !== GAME_STATE.PLAYING) return;
+            const dx = e.changedTouches[0].screenX - touchStartX;
+            const dy = e.changedTouches[0].screenY - touchStartY;
+
+            if (Math.abs(dx) > Math.abs(dy)) {
+                if (dx > 30) moveRight();
+                else if (dx < -30) moveLeft();
+            } else {
+                if (dy < -30) jump();
+            }
+        }, { passive: true });
+
+        // Botones en pantalla
+        document.getElementById('btn-left').addEventListener('click', moveLeft);
+        document.getElementById('btn-right').addEventListener('click', moveRight);
+        document.getElementById('btn-jump').addEventListener('click', jump);
+
+        const btnSprint = document.getElementById('btn-sprint');
+        btnSprint.addEventListener('mousedown', () => setSprint(true));
+        btnSprint.addEventListener('mouseup', () => setSprint(false));
+        btnSprint.addEventListener('mouseleave', () => setSprint(false));
+        btnSprint.addEventListener('touchstart', (e) => { e.preventDefault(); setSprint(true); });
+        btnSprint.addEventListener('touchend', (e) => { e.preventDefault(); setSprint(false); });
+
+        // Botones de inicio y reinicio
+        document.getElementById('start-btn').addEventListener('click', startGame);
+        document.getElementById('restart-btn').addEventListener('click', startGame);
+
+        // --- FLUJO DEL JUEGO ---
+        async function startGame() {
+            await initAudio();
+
+            // Reiniciar variables
+            currentState = GAME_STATE.PLAYING;
+            currentLane = 1;
+            targetX = LANES[1];
+            playerGroup.position.set(0, 0, 0);
+            playerY = 0;
+            velocityY = 0;
+            isGrounded = true;
+
+            baseSpeed = 19;
+            currentSpeed = 19;
+            distanceTraveled = 0;
+            stamina = 100;
+            isSprinting = false;
+            shovelZ = 6.5;
+            cameraShake = 0;
+
+            // Limpiar obstáculos y pickups previos
+            obstacles.forEach(o => scene.remove(o));
+            obstacles = [];
+            pickups.forEach(p => scene.remove(p));
+            pickups = [];
+
+            // UI
+            document.getElementById('start-screen').classList.add('hidden');
+            document.getElementById('gameover-screen').classList.add('hidden');
+            document.getElementById('hud').classList.remove('hidden');
+
+            lastTime = performance.now();
+        }
+
+        function triggerGameOver() {
+            currentState = GAME_STATE.GAMEOVER;
+            playSound('hit');
+            cameraShake = 0.8;
+
+            const finalMeters = Math.floor(distanceTraveled);
+            if (finalMeters > bestDistance) {
+                bestDistance = finalMeters;
+                localStorage.setItem('pala_best_score', bestDistance);
+            }
+
+            document.getElementById('final-score').textContent = finalMeters;
+            document.getElementById('best-score').textContent = bestDistance;
+            document.getElementById('hud').classList.add('hidden');
+            document.getElementById('danger-vignette').style.opacity = '0';
+            document.getElementById('gameover-screen').classList.remove('hidden');
+        }
+
+        // --- BUCLE PRINCIPAL DE ACTUALIZACIÓN ---
+        function update(dt, now) {
+            if (currentState !== GAME_STATE.PLAYING) {
+                // Animación en el menú de fondo
+                if (shovelPivot) {
+                    shovelPivot.rotation.z = Math.sin(now * 0.004) * 0.25;
+                }
+                return;
+            }
+
+            // 1. Progresión de dificultad y Sprint
+            baseSpeed = Math.min(34, 19 + distanceTraveled * 0.015);
+
+            if (isSprinting && stamina > 0) {
+                currentSpeed = baseSpeed * 1.38;
+                stamina = Math.max(0, stamina - 35 * dt);
+                if (stamina === 0) isSprinting = false;
+            } else {
+                currentSpeed = baseSpeed;
+                stamina = Math.min(100, stamina + 14 * dt);
+            }
+
+            distanceTraveled += currentSpeed * dt * 0.5;
+
+            // 2. Movimiento lateral suave del jugador
+            playerGroup.position.x += (targetX - playerGroup.position.x) * 14 * dt;
+            // Inclinación al girar
+            playerGroup.rotation.z = (playerGroup.position.x - targetX) * 0.18;
+
+            // 3. Física vertical (Salto y Gravedad)
+            if (!isGrounded) {
+                playerY += velocityY * dt;
+                velocityY += GRAVITY * dt;
+                if (playerY <= 0) {
+                    playerY = 0;
+                    velocityY = 0;
+                    isGrounded = true;
+                }
+            }
+            playerGroup.position.y = playerY;
+
+            // 4. Animación de extremidades del jugador al correr
+            const runCycle = now * 0.015 * (currentSpeed / 18);
+            const leftLeg = playerGroup.getObjectByName('leftLeg');
+            const rightLeg = playerGroup.getObjectByName('rightLeg');
+            const leftArm = playerGroup.getObjectByName('leftArm');
+            const rightArm = playerGroup.getObjectByName('rightArm');
+
+            if (isGrounded) {
+                leftLeg.rotation.x = Math.sin(runCycle) * 0.85;
+                rightLeg.rotation.x = -Math.sin(runCycle) * 0.85;
+                leftArm.rotation.x = -Math.sin(runCycle) * 0.75;
+                rightArm.rotation.x = Math.sin(runCycle) * 0.75;
+
+                // Sonido de pasos rítmico
+                if (now - lastStepTime > (isSprinting ? 210 : 290)) {
+                    playSound('step');
+                    lastStepTime = now;
+                }
+            } else {
+                // Pose en el aire
+                leftLeg.rotation.x = 0.4;
+                rightLeg.rotation.x = -0.3;
+            }
+
+            // 5. Movimiento del pasillo infinito
+            const segmentLength = 12;
+            const totalLength = segmentLength * corridorSegments.length;
+            corridorSegments.forEach(seg => {
+                seg.position.z += currentSpeed * dt;
+                if (seg.position.z > 18) {
+                    seg.position.z -= totalLength;
+                }
+            });
+
+            // Parpadeo ocasional de luces para efecto terror
+            if (Math.random() < 0.03) {
+                const randLight = corridorLights[Math.floor(Math.random() * corridorLights.length)];
+                if (randLight) randLight.intensity = Math.random() > 0.5 ? 1.2 : 0.2;
+            }
+
+            // 6. Generación y movimiento de Obstáculos
+            spawnTimer -= dt;
+            if (spawnTimer <= 0) {
+                spawnObstacle();
+                // Intervalo se reduce conforme aumenta la velocidad
+                spawnTimer = Math.max(0.75, 1.55 - (distanceTraveled * 0.001));
+            }
+
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                const obs = obstacles[i];
+                obs.position.z += currentSpeed * dt;
+
+                // Detección de colisión con el jugador (Z cerca de 0)
+                if (!obs.userData.hit && obs.position.z > -0.7 && obs.position.z < 0.7) {
+                    const dx = Math.abs(playerGroup.position.x - obs.position.x);
+                    if (dx < 0.95) {
+                        // Verificar si saltó por encima de un obstáculo bajo
+                        if (obs.userData.type === 'low' && playerY >= 0.75) {
+                            // ¡Salto exitoso!
+                        } else {
+                            // ¡Choque! La pala avanza drásticamente
+                            obs.userData.hit = true;
+                            shovelZ -= 2.8;
+                            cameraShake = 0.55;
+                            playSound('hit');
+                            // Efecto visual de rotura/empuje
+                            obs.position.y = -2;
+                        }
+                    }
+                }
+
+                if (obs.position.z > 12) {
+                    scene.remove(obs);
+                    obstacles.splice(i, 1);
+                }
+            }
+
+            // 7. Generación y movimiento de Bebidas Energéticas
+            pickupTimer -= dt;
+            if (pickupTimer <= 0) {
+                spawnPickup();
+                pickupTimer = 2.8 + Math.random() * 2;
+            }
+
+            for (let i = pickups.length - 1; i >= 0; i--) {
+                const p = pickups[i];
+                p.position.z += currentSpeed * dt;
+                p.rotation.y += 3 * dt;
+
+                // Recoger bebida
+                if (p.position.z > -0.8 && p.position.z < 0.8) {
+                    const dx = Math.abs(playerGroup.position.x - p.position.x);
+                    if (dx < 1.0 && playerY < 1.6) {
+                        stamina = Math.min(100, stamina + 40);
+                        // También te da un pequeño impulso para alejarte de la pala
+                        shovelZ = Math.min(SHOVEL_MAX_DIST, shovelZ + 1.2);
+                        playSound('pickup');
+                        scene.remove(p);
+                        pickups.splice(i, 1);
+                        continue;
+                    }
+                }
+
+                if (p.position.z > 12) {
+                    scene.remove(p);
+                    pickups.splice(i, 1);
+                }
+            }
+
+            // 8. Comportamiento y persecución de LA PALA
+            // La pala intenta alcanzarte constantemente; si haces sprint te alejas un poco
+            const shovelSpeedDiff = isSprinting ? -1.4 : 0.42;
+            shovelZ = Math.min(SHOVEL_MAX_DIST, shovelZ - shovelSpeedDiff * dt);
+
+            // La pala sigue lateralmente al jugador con un ligero retraso amenazante
+            shovelGroup.position.x += (playerGroup.position.x - shovelGroup.position.x) * 4.5 * dt;
+            shovelGroup.position.z = shovelZ;
+            shovelGroup.position.y = Math.abs(Math.sin(now * 0.012)) * 0.25;
+
+            // Animación de balanceo / ataque de la pala
+            shovelPivot.rotation.z = Math.sin(now * 0.01) * 0.35;
+            shovelPivot.rotation.x = -0.35 + Math.cos(now * 0.015) * 0.25;
+
+            // Comprobar si la pala atrapó al jugador
+            if (shovelZ <= SHOVEL_CATCH_DIST) {
+                triggerGameOver();
+                return;
+            }
+
+            // 9. Cámara dinámica y temblor (Screen Shake)
+            let shakeX = 0, shakeY = 0;
+            if (cameraShake > 0) {
+                shakeX = (Math.random() - 0.5) * cameraShake;
+                shakeY = (Math.random() - 0.5) * cameraShake;
+                cameraShake = Math.max(0, cameraShake - dt * 2.2);
+            }
+
+            // Temblor sutil adicional cuando la pala está muy cerca
+            const proximityRatio = 1 - Math.max(0, Math.min(1, (shovelZ - SHOVEL_CATCH_DIST) / (SHOVEL_MAX_DIST - SHOVEL_CATCH_DIST)));
+            if (proximityRatio > 0.65) {
+                shakeX += (Math.random() - 0.5) * 0.06 * proximityRatio;
+                shakeY += (Math.random() - 0.5) * 0.06 * proximityRatio;
+            }
+
+            camera.position.x = playerGroup.position.x * 0.55 + shakeX;
+            camera.position.y = 3.1 + playerY * 0.35 + shakeY;
+            // FOV dinámico al hacer sprint
+            const targetFov = isSprinting ? 74 : 65;
+            camera.fov += (targetFov - camera.fov) * 8 * dt;
+            camera.updateProjectionMatrix();
+
+            // 10. Actualizar HUD e indicadores de peligro
+            updateHUD(proximityRatio);
+        }
+
+        function updateHUD(proximityRatio) {
+            document.getElementById('score-display').textContent = Math.floor(distanceTraveled);
+            document.getElementById('stamina-bar').style.width = `${stamina}%`;
+
+            const dangerPercent = Math.round(proximityRatio * 100);
+            document.getElementById('danger-bar').style.width = `${dangerPercent}%`;
+
+            const enemyText = document.getElementById('distance-enemy-text');
+            const vignette = document.getElementById('danger-vignette');
+
+            if (dangerPercent > 75) {
+                enemyText.textContent = "¡ENCIMA TUYO!";
+                enemyText.className = "text-red-500 font-bold animate-pulse";
+                vignette.style.opacity = ((dangerPercent - 50) / 50).toFixed(2);
+            } else if (dangerPercent > 45) {
+                enemyText.textContent = "Cerca";
+                enemyText.className = "text-amber-400 font-semibold";
+                vignette.style.opacity = "0.2";
+            } else {
+                enemyText.textContent = "Lejos";
+                enemyText.className = "text-zinc-300";
+                vignette.style.opacity = "0";
+            }
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate(now) {
+            requestAnimationFrame(animate);
+            const dt = Math.min(0.05, (now - lastTime) / 1000 || 0.016);
+            lastTime = now;
+
+            update(dt, now);
+            renderer.render(scene, camera);
+        }
+
+        // Iniciar todo al cargar la ventana
+        window.onload = function () {
+            initThreeJS();
+            lastTime = performance.now();
+            requestAnimationFrame(animate);
+        };
+    </script>
+</body>
+</html>
