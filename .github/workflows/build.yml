@@ -1,0 +1,56 @@
+name: Crear APK y AAB
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Preparar ZIP
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip
+          mkdir proyecto
+          unzip *.zip -d proyecto
+          cd proyecto
+          if [ -d www ]; then
+            echo "Proyecto encontrado"
+          else
+            echo "No se encontró la carpeta www"
+            exit 1
+          fi
+
+      - name: Instalar Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Instalar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Compilar Android
+        working-directory: proyecto
+        run: |
+          npm install
+          npx cap add android
+          npx cap sync android
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+          ./gradlew bundleRelease
+
+      - name: Guardar APK y AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: Escapa-de-la-Pala-3
+          path: |
+            proyecto/android/app/build/outputs/apk/debug/app-debug.apk
+            proyecto/android/app/build/outputs/bundle/release/app-release.aab
