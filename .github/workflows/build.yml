@@ -1,3 +1,4 @@
+
 name: Crear APK y AAB
 
 on:
@@ -11,19 +12,8 @@ jobs:
       - name: Descargar repositorio
         uses: actions/checkout@v4
 
-      - name: Preparar ZIP
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y unzip
-          mkdir proyecto
-          unzip *.zip -d proyecto
-          cd proyecto
-          if [ -d www ]; then
-            echo "Proyecto encontrado"
-          else
-            echo "No se encontró la carpeta www"
-            exit 1
-          fi
+      - name: Verificar juego
+        run: test -f www/index.html
 
       - name: Instalar Node
         uses: actions/setup-node@v4
@@ -36,21 +26,26 @@ jobs:
           distribution: temurin
           java-version: 21
 
-      - name: Compilar Android
-        working-directory: proyecto
+      - name: Preparar Capacitor
         run: |
-          npm install
+          npm init -y
+          npm install @capacitor/core@7 @capacitor/android@7
+          npm install --save-dev @capacitor/cli@7
+          echo '{"appId":"com.example.escapadelapala3d","appName":"Escapa de la Pala 3D","webDir":"www"}' > capacitor.config.json
           npx cap add android
           npx cap sync android
+
+      - name: Compilar APK y AAB
+        run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug
-          ./gradlew bundleRelease
+          ./gradlew assembleDebug bundleDebug
 
       - name: Guardar APK y AAB
         uses: actions/upload-artifact@v4
         with:
-          name: Escapa-de-la-Pala-3
+          name: Escapa-de-la-Pala-3D
           path: |
-            proyecto/android/app/build/outputs/apk/debug/app-debug.apk
-            proyecto/android/app/build/outputs/bundle/release/app-release.aab
+            android/app/build/outputs/apk/debug/app-debug.apk
+            android/app/build/outputs/bundle/debug/app-debug.aab
+            
